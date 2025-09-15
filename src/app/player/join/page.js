@@ -2,7 +2,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../../lib/supabase";
 
 export default function PlayerJoin() {
   const [loading, setLoading] = useState(true);
