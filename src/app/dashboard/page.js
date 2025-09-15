@@ -1,8 +1,8 @@
 // /app/dashboard/page.js
 "use client";
 import { useState, useEffect } from "react";
-import { supabase } from "../../../lib/supabase";
-import { getCurrentCoach, signOut } from "../../../lib/auth";
+import { supabase } from "../../lib/supabase";
+import { getCurrentCoach, signOut } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 import { Plus, Users, FileText, LogOut, Edit, Trash2 } from "lucide-react";
 

@@ -22,36 +22,35 @@ export default function PlayerJoin() {
       setError("No invite code provided");
       setLoading(false);
     }
-  }, [inviteCode]);
-
-  const validateInvite = async () => {
-    try {
-      const { data: invite, error } = await supabase
-        .from("player_invites")
-        .select(
-          `
+    const validateInvite = async () => {
+      try {
+        const { data: invite, error } = await supabase
+          .from("player_invites")
+          .select(
+            `
           *,
           players:player_id (name, position),
           coaches:coach_id (full_name, team_name)
         `
-        )
-        .eq("invite_code", inviteCode)
-        .gt("expires_at", new Date().toISOString())
-        .is("accepted_at", null)
-        .single();
+          )
+          .eq("invite_code", inviteCode)
+          .gt("expires_at", new Date().toISOString())
+          .is("accepted_at", null)
+          .single();
 
-      if (error || !invite) {
-        setError("Invalid or expired invite code");
-        return;
+        if (error || !invite) {
+          setError("Invalid or expired invite code");
+          return;
+        }
+
+        setInviteData(invite);
+      } catch (err) {
+        setError("Error validating invite");
+      } finally {
+        setLoading(false);
       }
-
-      setInviteData(invite);
-    } catch (err) {
-      setError("Error validating invite");
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+  }, [inviteCode]);
 
   const createAccount = async (e) => {
     e.preventDefault();

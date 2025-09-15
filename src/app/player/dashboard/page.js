@@ -2,7 +2,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
-import { getCurrentCoach, signOut } from "../../lib/auth";
+import { getCurrentCoach, signOut } from "../../../lib/auth";
 import { useRouter } from "next/navigation";
 import {
   Plus,
