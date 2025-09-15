@@ -51,7 +51,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     checkAuth();
-  }, []);
+  }, );
 
   const checkAuth = async () => {
     try {
