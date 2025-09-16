@@ -1,123 +1,117 @@
 // /app/player/join/page.js
-"use client";
+'use client'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { supabase } from '../../../lib/supabase'
 
-import { useState, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-import { Suspense } from "react";
-
-export default function PlayerJoin() {
-  return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading page...</div>}>
-      <PlayerJoinContent />
-    </Suspense>
-  );
-}
 function PlayerJoinContent() {
-  const [loading, setLoading] = useState(true);
-  const [inviteData, setInviteData] = useState(null);
-  const [error, setError] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [isCreatingAccount, setIsCreatingAccount] = useState(false);
-  const router = useRouter();
-
-  const searchParams = useSearchParams();
-  const inviteCode = searchParams.get("code");
+  const [loading, setLoading] = useState(true)
+  const [inviteData, setInviteData] = useState(null)
+  const [error, setError] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [isCreatingAccount, setIsCreatingAccount] = useState(false)
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const inviteCode = searchParams.get('code')
 
   useEffect(() => {
-    if (!inviteCode) {
-      setError("No invite code provided");
-      setLoading(false);
-      return;
+    if (inviteCode) {
+      validateInvite()
+    } else {
+      setError('No invite code provided')
+      setLoading(false)
     }
+  }, [inviteCode])
 
-    const validateInvite = async () => {
-      try {
-        const { data: invite, error } = await supabase
-          .from("player_invites")
-          .select(
-            `
-            *,
-            players:player_id (name, position),
-            coaches:coach_id (full_name, team_name)
-          `
-          )
-          .eq("invite_code", inviteCode)
-          .gt("expires_at", new Date().toISOString())
-          .is("accepted_at", null)
-          .single();
+  const validateInvite = async () => {
+    try {
+      const { data: invite, error } = await supabase
+        .from('player_invites')
+        .select(`
+          *,
+          players:player_id (name, position),
+          coaches:coach_id (full_name, team_name)
+        `)
+        .eq('invite_code', inviteCode)
+        .gt('expires_at', new Date().toISOString())
+        .is('accepted_at', null)
+        .single()
 
-        if (error || !invite) {
-          setError("Invalid or expired invite code");
-          return;
-        }
-
-        setInviteData(invite);
-      } catch (err) {
-        setError("Error validating invite");
-      } finally {
-        setLoading(false);
+      if (error || !invite) {
+        setError('Invalid or expired invite code')
+        return
       }
-    };
 
-    validateInvite();
-  }, [inviteCode]);
+      setInviteData(invite)
+    } catch (err) {
+      setError('Error validating invite')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const createAccount = async (e) => {
-    e.preventDefault();
-
+    e.preventDefault()
+    
     if (password !== confirmPassword) {
-      setError("Passwords do not match");
-      return;
+      setError('Passwords do not match')
+      return
     }
 
     if (password.length < 6) {
-      setError("Password must be at least 6 characters");
-      return;
+      setError('Password must be at least 6 characters')
+      return
     }
 
-    setIsCreatingAccount(true);
-    setError("");
+    setIsCreatingAccount(true)
+    setError('')
 
     try {
-      const { error: authError } = await supabase.auth.signUp({
+      // Create auth user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
         email: inviteData.email,
-        password,
+        password: password,
         options: {
           data: {
             full_name: inviteData.players.name,
-            user_type: "player",
-          },
-        },
-      });
+            user_type: 'player'
+          }
+        }
+      })
 
-      if (authError) throw authError;
+      if (authError) throw authError
 
-      await supabase
-        .from("player_invites")
+      // Mark invite as accepted
+      const { error: updateError } = await supabase
+        .from('player_invites')
         .update({ accepted_at: new Date().toISOString() })
-        .eq("id", inviteData.id);
+        .eq('id', inviteData.id)
 
+      if (updateError) throw updateError
+
+      // Update player's last_login
       await supabase
-        .from("players")
+        .from('players')
         .update({ last_login: new Date().toISOString() })
-        .eq("id", inviteData.player_id);
+        .eq('id', inviteData.player_id)
 
-      router.push("/player/dashboard");
+      // Redirect to player dashboard
+      router.push('/player/dashboard')
+
     } catch (error) {
-      setError(error.message);
+      setError(error.message)
     } finally {
-      setIsCreatingAccount(false);
+      setIsCreatingAccount(false)
     }
-  };
+  }
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
         <div className="text-xl">Loading...</div>
       </div>
-    );
+    )
   }
 
   if (error) {
@@ -130,7 +124,7 @@ function PlayerJoinContent() {
           </div>
         </div>
       </div>
-    );
+    )
   }
 
   return (
@@ -139,8 +133,7 @@ function PlayerJoinContent() {
         <div className="text-center mb-6">
           <h1 className="text-2xl font-bold text-gray-900">Join Your Team</h1>
           <p className="text-gray-600 mt-2">
-            You&apos;ve been invited by{" "}
-            <strong>{inviteData.coaches.full_name}</strong>
+            You've been invited by <strong>{inviteData.coaches.full_name}</strong>
           </p>
           <p className="text-sm text-gray-500">
             Team: {inviteData.coaches.team_name}
@@ -150,9 +143,7 @@ function PlayerJoinContent() {
         <div className="bg-blue-50 border border-blue-200 rounded-md p-4 mb-6">
           <h3 className="font-medium text-blue-800">Player Details:</h3>
           <p className="text-blue-700">Name: {inviteData.players.name}</p>
-          <p className="text-blue-700">
-            Position: {inviteData.players.position || "Not specified"}
-          </p>
+          <p className="text-blue-700">Position: {inviteData.players.position || 'Not specified'}</p>
           <p className="text-blue-700">Email: {inviteData.email}</p>
         </div>
 
@@ -198,11 +189,22 @@ function PlayerJoinContent() {
             disabled={isCreatingAccount}
             className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
           >
-            {isCreatingAccount ? "Creating Account..." : "Create Account & Join Team"}
+            {isCreatingAccount ? 'Creating Account...' : 'Create Account & Join Team'}
           </button>
         </form>
       </div>
     </div>
-  );
+  )
 }
 
+export default function PlayerJoin() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-xl">Loading...</div>
+      </div>
+    }>
+      <PlayerJoinContent />
+    </Suspense>
+  )
+}
