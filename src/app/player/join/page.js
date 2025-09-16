@@ -1,10 +1,12 @@
 // /app/player/join/page.js
 "use client";
+
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { Suspense } from "react";
 
-export default function PlayerJoin() {
+function PlayerJoinContent() {
   const [loading, setLoading] = useState(true);
   const [inviteData, setInviteData] = useState(null);
   const [error, setError] = useState("");
@@ -12,26 +14,27 @@ export default function PlayerJoin() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const router = useRouter();
-  const searchParams = (useSearchParams());
+
+  const searchParams = useSearchParams();
   const inviteCode = searchParams.get("code");
 
   useEffect(() => {
-    if (inviteCode) {
-      validateInvite();
-    } else {
+    if (!inviteCode) {
       setError("No invite code provided");
       setLoading(false);
+      return;
     }
+
     const validateInvite = async () => {
       try {
         const { data: invite, error } = await supabase
           .from("player_invites")
           .select(
             `
-          *,
-          players:player_id (name, position),
-          coaches:coach_id (full_name, team_name)
-        `
+            *,
+            players:player_id (name, position),
+            coaches:coach_id (full_name, team_name)
+          `
           )
           .eq("invite_code", inviteCode)
           .gt("expires_at", new Date().toISOString())
@@ -50,6 +53,8 @@ export default function PlayerJoin() {
         setLoading(false);
       }
     };
+
+    validateInvite();
   }, [inviteCode]);
 
   const createAccount = async (e) => {
@@ -69,10 +74,9 @@ export default function PlayerJoin() {
     setError("");
 
     try {
-      // Create auth user
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const { error: authError } = await supabase.auth.signUp({
         email: inviteData.email,
-        password: password,
+        password,
         options: {
           data: {
             full_name: inviteData.players.name,
@@ -83,21 +87,16 @@ export default function PlayerJoin() {
 
       if (authError) throw authError;
 
-      // Mark invite as accepted
-      const { error: updateError } = await supabase
+      await supabase
         .from("player_invites")
         .update({ accepted_at: new Date().toISOString() })
         .eq("id", inviteData.id);
 
-      if (updateError) throw updateError;
-
-      // Update player's last_login
       await supabase
         .from("players")
         .update({ last_login: new Date().toISOString() })
         .eq("id", inviteData.player_id);
 
-      // Redirect to player dashboard
       router.push("/player/dashboard");
     } catch (error) {
       setError(error.message);
@@ -152,10 +151,7 @@ export default function PlayerJoin() {
 
         <form onSubmit={createAccount} className="space-y-4">
           <div>
-            <label
-              htmlFor="password"
-              className="block text-sm font-medium text-gray-700"
-            >
+            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
               Create Password
             </label>
             <input
@@ -170,10 +166,7 @@ export default function PlayerJoin() {
           </div>
 
           <div>
-            <label
-              htmlFor="confirmPassword"
-              className="block text-sm font-medium text-gray-700"
-            >
+            <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700">
               Confirm Password
             </label>
             <input
@@ -198,12 +191,18 @@ export default function PlayerJoin() {
             disabled={isCreatingAccount}
             className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
           >
-            {isCreatingAccount
-              ? "Creating Account..."
-              : "Create Account & Join Team"}
+            {isCreatingAccount ? "Creating Account..." : "Create Account & Join Team"}
           </button>
         </form>
       </div>
     </div>
+  );
+}
+
+export default function PlayerJoin() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading page...</div>}>
+      <PlayerJoinContent />
+    </Suspense>
   );
 }
