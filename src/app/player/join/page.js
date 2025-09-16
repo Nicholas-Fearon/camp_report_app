@@ -2,7 +2,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "../../../lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 export default function PlayerJoin() {
   const [loading, setLoading] = useState(true);
@@ -12,7 +12,7 @@ export default function PlayerJoin() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const searchParams = (useSearchParams());
   const inviteCode = searchParams.get("code");
 
   useEffect(() => {

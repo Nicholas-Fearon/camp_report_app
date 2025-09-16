@@ -1,7 +1,7 @@
 // /components/PlayerInvitation.js
 'use client'
 import { useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase } from '@/lib/supabase'
 import { Mail, Copy, Check } from 'lucide-react'
 
 export default function PlayerInvitation({ player, coach, onInviteSent }) {
