@@ -4,6 +4,9 @@ import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { supabase } from '../../../lib/supabase'
 
+// Force dynamic rendering for this page
+export const dynamic = 'force-dynamic'
+
 function PlayerJoinContent() {
   const [loading, setLoading] = useState(true)
   const [inviteData, setInviteData] = useState(null)
@@ -13,18 +16,18 @@ function PlayerJoinContent() {
   const [isCreatingAccount, setIsCreatingAccount] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
-  const inviteCode = searchParams.get('code')
 
   useEffect(() => {
+    const inviteCode = searchParams.get('code')
     if (inviteCode) {
-      validateInvite()
+      validateInvite(inviteCode)
     } else {
       setError('No invite code provided')
       setLoading(false)
     }
-  }, [inviteCode])
+  }, [searchParams])
 
-  const validateInvite = async () => {
+  const validateInvite = async (inviteCode) => {
     try {
       const { data: invite, error } = await supabase
         .from('player_invites')
