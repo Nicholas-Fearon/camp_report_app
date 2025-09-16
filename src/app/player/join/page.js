@@ -6,6 +6,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { Suspense } from "react";
 
+export default function PlayerJoin() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading page...</div>}>
+      <PlayerJoinContent />
+    </Suspense>
+  );
+}
 function PlayerJoinContent() {
   const [loading, setLoading] = useState(true);
   const [inviteData, setInviteData] = useState(null);
@@ -199,10 +206,3 @@ function PlayerJoinContent() {
   );
 }
 
-export default function PlayerJoin() {
-  return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading page...</div>}>
-      <PlayerJoinContent />
-    </Suspense>
-  );
-}

@@ -1,10 +1,21 @@
-// /app/dashboard/page.js
+// /app/dashboard/page.js (Updated with Player Invitations)
 "use client";
 import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
-import { getCurrentCoach, signOut } from "@/lib/auth";
+import { supabase } from "../../lib/supabase";
+import { getCurrentCoach, signOut } from "../../lib/auth";
 import { useRouter } from "next/navigation";
-import { Plus, Users, FileText, LogOut, Edit, Trash2 } from "lucide-react";
+import {
+  Plus,
+  Users,
+  FileText,
+  LogOut,
+  Edit,
+  Trash2,
+  Mail,
+  Copy,
+  Check,
+  Eye,
+} from "lucide-react";
 
 export default function Dashboard() {
   const [coach, setCoach] = useState(null);
@@ -14,6 +25,7 @@ export default function Dashboard() {
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [showCreateReport, setShowCreateReport] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [inviteStates, setInviteStates] = useState({}); // Track invite states per player
   const router = useRouter();
 
   // Player form state
@@ -39,7 +51,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     checkAuth();
-  });
+  }, []);
 
   const checkAuth = async () => {
     try {
@@ -181,6 +193,93 @@ export default function Dashboard() {
     }
   };
 
+  const generateInviteCode = async () => {
+    const { data } = await supabase.rpc("generate_invite_code");
+    return data;
+  };
+
+  const handleInvitePlayer = async (player, email) => {
+    try {
+      setInviteStates((prev) => ({ ...prev, [player.id]: { loading: true } }));
+
+      // Generate invite code
+      const inviteCode = await generateInviteCode();
+
+      // Create invite record
+      const { data: invite, error: inviteError } = await supabase
+        .from("player_invites")
+        .insert([
+          {
+            player_id: player.id,
+            coach_id: coach.id,
+            email: email,
+            invite_code: inviteCode,
+          },
+        ])
+        .select()
+        .single();
+
+      if (inviteError) throw inviteError;
+
+      // Update player with email
+      const { error: updateError } = await supabase
+        .from("players")
+        .update({
+          email: email,
+          invite_sent: true,
+        })
+        .eq("id", player.id);
+
+      if (updateError) throw updateError;
+
+      // Generate invite link
+      const baseUrl = window.location.origin;
+      const link = `${baseUrl}/player/join?code=${inviteCode}`;
+
+      setInviteStates((prev) => ({
+        ...prev,
+        [player.id]: {
+          loading: false,
+          sent: true,
+          email: email,
+          link: link,
+        },
+      }));
+
+      // Update local players state
+      setPlayers(
+        players.map((p) =>
+          p.id === player.id ? { ...p, email: email, invite_sent: true } : p
+        )
+      );
+    } catch (error) {
+      console.error("Error sending invite:", error);
+      alert("Error sending invite: " + error.message);
+      setInviteStates((prev) => ({
+        ...prev,
+        [player.id]: { loading: false, error: error.message },
+      }));
+    }
+  };
+
+  const copyInviteLink = async (playerId, link) => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setInviteStates((prev) => ({
+        ...prev,
+        [playerId]: { ...prev[playerId], copied: true },
+      }));
+      setTimeout(() => {
+        setInviteStates((prev) => ({
+          ...prev,
+          [playerId]: { ...prev[playerId], copied: false },
+        }));
+      }, 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  };
+
   const handleSignOut = async () => {
     await signOut();
     router.push("/");
@@ -264,15 +363,15 @@ export default function Dashboard() {
             <div className="p-5">
               <div className="flex items-center">
                 <div className="flex-shrink-0">
-                  <Plus className="h-6 w-6 text-gray-400" />
+                  <Mail className="h-6 w-6 text-gray-400" />
                 </div>
                 <div className="ml-5 w-0 flex-1">
                   <dl>
                     <dt className="text-sm font-medium text-gray-500 truncate">
-                      Team
+                      Invited Players
                     </dt>
                     <dd className="text-lg font-medium text-gray-900">
-                      {coach?.team_name || "Not Set"}
+                      {players.filter((p) => p.invite_sent).length}
                     </dd>
                   </dl>
                 </div>
@@ -366,41 +465,92 @@ export default function Dashboard() {
                 </form>
               )}
 
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {players.map((player) => (
                   <div
                     key={player.id}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-md"
+                    className="border border-gray-200 rounded-lg p-4"
                   >
-                    <div>
-                      <p className="font-medium">{player.name}</p>
-                      <p className="text-sm text-gray-500">
-                        {player.position}{" "}
-                        {player.jersey_number && `#${player.jersey_number}`}{" "}
-                        {player.age && `(Age: ${player.age})`}
-                      </p>
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="font-medium">{player.name}</p>
+                        <p className="text-sm text-gray-500">
+                          {player.position}{" "}
+                          {player.jersey_number && `#${player.jersey_number}`}{" "}
+                          {player.age && `(Age: ${player.age})`}
+                        </p>
+                        {player.email && (
+                          <p className="text-xs text-gray-400">
+                            Email: {player.email}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setSelectedPlayer(player);
+                            setReportForm({
+                              ...reportForm,
+                              player_id: player.id,
+                            });
+                            setShowCreateReport(true);
+                          }}
+                          className="text-blue-600 hover:text-blue-800"
+                          title="Create Report"
+                        >
+                          <FileText className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeletePlayer(player.id)}
+                          className="text-red-600 hover:text-red-800"
+                          title="Delete Player"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          setSelectedPlayer(player);
-                          setReportForm({
-                            ...reportForm,
-                            player_id: player.id,
-                          });
-                          setShowCreateReport(true);
-                        }}
-                        className="text-blue-600 hover:text-blue-800"
-                      >
-                        <FileText className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDeletePlayer(player.id)}
-                        className="text-red-600 hover:text-red-800"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+
+                    {/* Invite System */}
+                    {!player.invite_sent && !inviteStates[player.id]?.sent && (
+                      <PlayerInviteForm
+                        player={player}
+                        loading={inviteStates[player.id]?.loading}
+                        onInvite={(email) => handleInvitePlayer(player, email)}
+                      />
+                    )}
+
+                    {(player.invite_sent || inviteStates[player.id]?.sent) && (
+                      <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-md">
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-green-700">
+                            ✓ Invite sent to{" "}
+                            {player.email || inviteStates[player.id]?.email}
+                          </span>
+                          {inviteStates[player.id]?.link && (
+                            <button
+                              onClick={() =>
+                                copyInviteLink(
+                                  player.id,
+                                  inviteStates[player.id].link
+                                )
+                              }
+                              className="flex items-center px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                            >
+                              {inviteStates[player.id]?.copied ? (
+                                <Check className="w-3 h-3" />
+                              ) : (
+                                <Copy className="w-3 h-3" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                        {inviteStates[player.id]?.link && (
+                          <p className="text-xs text-green-600 mt-1 font-mono break-all">
+                            {inviteStates[player.id].link}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
                 {players.length === 0 && (
@@ -431,133 +581,13 @@ export default function Dashboard() {
               </div>
 
               {showCreateReport && (
-                <form
+                <ReportForm
+                  reportForm={reportForm}
+                  setReportForm={setReportForm}
+                  players={players}
                   onSubmit={handleCreateReport}
-                  className="mb-6 p-4 bg-gray-50 rounded-md"
-                >
-                  <div className="space-y-4">
-                    <select
-                      value={reportForm.player_id}
-                      onChange={(e) =>
-                        setReportForm({
-                          ...reportForm,
-                          player_id: e.target.value,
-                        })
-                      }
-                      className="w-full border border-gray-300 rounded-md px-3 py-2"
-                      required
-                    >
-                      <option value="">Select Player</option>
-                      {players.map((player) => (
-                        <option key={player.id} value={player.id}>
-                          {player.name}
-                        </option>
-                      ))}
-                    </select>
-
-                    <input
-                      type="date"
-                      value={reportForm.report_date}
-                      onChange={(e) =>
-                        setReportForm({
-                          ...reportForm,
-                          report_date: e.target.value,
-                        })
-                      }
-                      className="w-full border border-gray-300 rounded-md px-3 py-2"
-                      required
-                    />
-
-                    <div className="grid grid-cols-2 gap-4">
-                      {[
-                        "technical_skills",
-                        "physical_condition",
-                        "teamwork",
-                        "attitude",
-                      ].map((field) => (
-                        <div key={field}>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">
-                            {field
-                              .replace("_", " ")
-                              .replace(/\b\w/g, (l) => l.toUpperCase())}{" "}
-                            (1-10)
-                          </label>
-                          <input
-                            type="range"
-                            min="1"
-                            max="10"
-                            value={reportForm[field]}
-                            onChange={(e) =>
-                              setReportForm({
-                                ...reportForm,
-                                [field]: e.target.value,
-                              })
-                            }
-                            className="w-full"
-                          />
-                          <span className="text-sm text-gray-500">
-                            {reportForm[field]}/10
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <textarea
-                      placeholder="Strengths"
-                      value={reportForm.strengths}
-                      onChange={(e) =>
-                        setReportForm({
-                          ...reportForm,
-                          strengths: e.target.value,
-                        })
-                      }
-                      className="w-full border border-gray-300 rounded-md px-3 py-2"
-                      rows="3"
-                    />
-
-                    <textarea
-                      placeholder="Areas for Improvement"
-                      value={reportForm.areas_for_improvement}
-                      onChange={(e) =>
-                        setReportForm({
-                          ...reportForm,
-                          areas_for_improvement: e.target.value,
-                        })
-                      }
-                      className="w-full border border-gray-300 rounded-md px-3 py-2"
-                      rows="3"
-                    />
-
-                    <textarea
-                      placeholder="Additional Notes"
-                      value={reportForm.additional_notes}
-                      onChange={(e) =>
-                        setReportForm({
-                          ...reportForm,
-                          additional_notes: e.target.value,
-                        })
-                      }
-                      className="w-full border border-gray-300 rounded-md px-3 py-2"
-                      rows="3"
-                    />
-                  </div>
-
-                  <div className="mt-4 flex gap-2">
-                    <button
-                      type="submit"
-                      className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
-                    >
-                      Create Report
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowCreateReport(false)}
-                      className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
+                  onCancel={() => setShowCreateReport(false)}
+                />
               )}
 
               <div className="space-y-3">
@@ -597,5 +627,185 @@ export default function Dashboard() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Separate component for player invite form
+function PlayerInviteForm({ player, loading, onInvite }) {
+  const [email, setEmail] = useState("");
+  const [showForm, setShowForm] = useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (email) {
+      onInvite(email);
+      setEmail("");
+      setShowForm(false);
+    }
+  };
+
+  if (!showForm) {
+    return (
+      <button
+        onClick={() => setShowForm(true)}
+        className="w-full mt-2 px-3 py-2 text-sm bg-blue-50 text-blue-700 border border-blue-200 rounded-md hover:bg-blue-100"
+      >
+        <Mail className="w-4 h-4 inline mr-1" />
+        Invite to Portal
+      </button>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md"
+    >
+      <div className="flex gap-2">
+        <input
+          type="email"
+          placeholder="Player's email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded"
+          required
+        />
+        <button
+          type="submit"
+          disabled={loading || !email}
+          className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+        >
+          {loading ? "Sending..." : "Send"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowForm(false)}
+          className="px-2 py-1 text-sm text-gray-600 hover:text-gray-800"
+        >
+          ✕
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// Separate component for report form
+function ReportForm({
+  reportForm,
+  setReportForm,
+  players,
+  onSubmit,
+  onCancel,
+}) {
+  return (
+    <form onSubmit={onSubmit} className="mb-6 p-4 bg-gray-50 rounded-md">
+      <div className="space-y-4">
+        <select
+          value={reportForm.player_id}
+          onChange={(e) =>
+            setReportForm({ ...reportForm, player_id: e.target.value })
+          }
+          className="w-full border border-gray-300 rounded-md px-3 py-2"
+          required
+        >
+          <option value="">Select Player</option>
+          {players.map((player) => (
+            <option key={player.id} value={player.id}>
+              {player.name}
+            </option>
+          ))}
+        </select>
+
+        <input
+          type="date"
+          value={reportForm.report_date}
+          onChange={(e) =>
+            setReportForm({ ...reportForm, report_date: e.target.value })
+          }
+          className="w-full border border-gray-300 rounded-md px-3 py-2"
+          required
+        />
+
+        <div className="grid grid-cols-2 gap-4">
+          {[
+            "technical_skills",
+            "physical_condition",
+            "teamwork",
+            "attitude",
+          ].map((field) => (
+            <div key={field}>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                {field
+                  .replace("_", " ")
+                  .replace(/\b\w/g, (l) => l.toUpperCase())}{" "}
+                (1-10)
+              </label>
+              <input
+                type="range"
+                min="1"
+                max="10"
+                value={reportForm[field]}
+                onChange={(e) =>
+                  setReportForm({ ...reportForm, [field]: e.target.value })
+                }
+                className="w-full"
+              />
+              <span className="text-sm text-gray-500">
+                {reportForm[field]}/10
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <textarea
+          placeholder="Strengths"
+          value={reportForm.strengths}
+          onChange={(e) =>
+            setReportForm({ ...reportForm, strengths: e.target.value })
+          }
+          className="w-full border border-gray-300 rounded-md px-3 py-2"
+          rows="3"
+        />
+
+        <textarea
+          placeholder="Areas for Improvement"
+          value={reportForm.areas_for_improvement}
+          onChange={(e) =>
+            setReportForm({
+              ...reportForm,
+              areas_for_improvement: e.target.value,
+            })
+          }
+          className="w-full border border-gray-300 rounded-md px-3 py-2"
+          rows="3"
+        />
+
+        <textarea
+          placeholder="Additional Notes"
+          value={reportForm.additional_notes}
+          onChange={(e) =>
+            setReportForm({ ...reportForm, additional_notes: e.target.value })
+          }
+          className="w-full border border-gray-300 rounded-md px-3 py-2"
+          rows="3"
+        />
+      </div>
+
+      <div className="mt-4 flex gap-2">
+        <button
+          type="submit"
+          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+        >
+          Create Report
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
