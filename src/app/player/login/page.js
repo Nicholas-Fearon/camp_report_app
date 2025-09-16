@@ -135,7 +135,7 @@ export default function PlayerLogin() {
 
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-600">
-            Don't have an account? You'll need an invite from your coach.
+            Don&apos;t have an account? You&apos;ll need an invite from your coach.
           </p>
           <button
             onClick={() => router.push('/')}
