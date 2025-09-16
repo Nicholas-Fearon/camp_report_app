@@ -1,68 +1,88 @@
 // /app/player/login/page.js
-'use client'
-import { useState, useEffect } from 'react'
-import { supabase } from '../../../lib/supabase'
-import { useRouter } from 'next/navigation'
+"use client";
+import { useState, useEffect } from "react";
+import { supabase } from "../../../lib/supabase";
+import { useRouter } from "next/navigation";
 
 export default function PlayerLogin() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const router = useRouter()
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [checkingSession, setCheckingSession] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
     // Check if already logged in
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session) {
-        // Verify this is a player account
-        const { data: player } = await supabase
-          .from('players')
-          .select('id')
-          .eq('email', session.user.email)
-          .single()
-        
-        if (player) {
-          router.push('/player/dashboard')
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session) {
+          // Verify this is a player account
+          const { data: player } = await supabase
+            .from("players")
+            .select("id")
+            .eq("email", session.user.email)
+            .single();
+
+          if (player) {
+            router.push("/player/dashboard");
+            return;
+          }
         }
+      } catch (error) {
+        console.error("Session check error:", error);
+      } finally {
+        setCheckingSession(false);
       }
-    }
-    
-    checkSession()
-  }, [router])
+    };
+
+    checkSession();
+  }, [router]);
 
   const handleLogin = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
+    e.preventDefault();
+    setLoading(true);
+    setError("");
 
     try {
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
-      })
+      });
 
-      if (error) throw error
+      if (error) throw error;
 
       // Verify this is a player account
       const { data: player, error: playerError } = await supabase
-        .from('players')
-        .select('id')
-        .eq('email', email)
-        .single()
+        .from("players")
+        .select("id")
+        .eq("email", email)
+        .single();
 
       if (playerError || !player) {
-        await supabase.auth.signOut()
-        throw new Error('This account is not associated with any player. Please contact your coach.')
+        await supabase.auth.signOut();
+        throw new Error(
+          "This account is not associated with any player. Please contact your coach."
+        );
       }
 
-      router.push('/player/dashboard')
+      router.push("/player/dashboard");
     } catch (error) {
-      setError(error.message)
+      setError(error.message);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
+  };
+
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="text-xl">Loading...</div>
+      </div>
+    );
   }
 
   return (
@@ -75,7 +95,10 @@ export default function PlayerLogin() {
 
         <form onSubmit={handleLogin} className="space-y-6">
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+            <label
+              htmlFor="email"
+              className="block text-sm font-medium text-gray-700"
+            >
               Email
             </label>
             <input
@@ -89,7 +112,10 @@ export default function PlayerLogin() {
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+            <label
+              htmlFor="password"
+              className="block text-sm font-medium text-gray-700"
+            >
               Password
             </label>
             <input
@@ -113,7 +139,7 @@ export default function PlayerLogin() {
             disabled={loading}
             className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
           >
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? "Signing in..." : "Sign In"}
           </button>
         </form>
 
@@ -122,7 +148,7 @@ export default function PlayerLogin() {
             Don't have an account? You'll need an invite from your coach.
           </p>
           <button
-            onClick={() => router.push('/')}
+            onClick={() => router.push("/")}
             className="mt-2 text-blue-600 hover:text-blue-500 text-sm font-medium"
           >
             Are you a coach? Sign in here
@@ -130,5 +156,5 @@ export default function PlayerLogin() {
         </div>
       </div>
     </div>
-  )
+  );
 }
