@@ -1,7 +1,7 @@
 // /app/dashboard/page.js (Updated with Player Invitations)
 "use client";
 import { useState, useEffect } from "react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../../lib/supabase";
 import { getCurrentCoach, signOut } from "../../../lib/auth";
 import { useRouter } from "next/navigation";
 import {
@@ -51,7 +51,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     checkAuth();
-  }, );
+  });
 
   const checkAuth = async () => {
     try {
