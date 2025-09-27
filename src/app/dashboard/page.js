@@ -1,6 +1,6 @@
-// /app/dashboard/page.js (Updated with Player Invitations)
+// /app/dashboard/page.js (Modern version)
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useTransition, useOptimistic } from "react";
 import { supabase } from "../../lib/supabase";
 import { getCurrentCoach, signOut } from "../../lib/auth";
 import { useRouter } from "next/navigation";
@@ -9,12 +9,10 @@ import {
   Users,
   FileText,
   LogOut,
-  Edit,
   Trash2,
   Mail,
   Copy,
   Check,
-  Eye,
 } from "lucide-react";
 
 export default function Dashboard() {
@@ -24,11 +22,22 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [showCreateReport, setShowCreateReport] = useState(false);
-  const [selectedPlayer, setSelectedPlayer] = useState(null);
-  const [inviteStates, setInviteStates] = useState({}); // Track invite states per player
+  const [inviteStates, setInviteStates] = useState({});
+  const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
-  // Player form state
+  // Optimistic updates for better UX
+  const [optimisticPlayers, addOptimisticPlayer] = useOptimistic(
+    players,
+    (state, newPlayer) => [...state, newPlayer]
+  );
+
+  const [optimisticReports, addOptimisticReport] = useOptimistic(
+    reports,
+    (state, newReport) => [newReport, ...state]
+  );
+
+  // Player form state with validation
   const [playerForm, setPlayerForm] = useState({
     name: "",
     position: "",
@@ -50,51 +59,59 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
-    checkAuth();
-  }, []);
+    let isMounted = true;
 
-  const checkAuth = async () => {
-    try {
-      const currentCoach = await getCurrentCoach();
-      if (!currentCoach) {
-        router.push("/");
-        return;
+    const initializeData = async () => {
+      try {
+        const currentCoach = await getCurrentCoach();
+        if (!currentCoach) {
+          router.push("/");
+          return;
+        }
+
+        if (isMounted) {
+          setCoach(currentCoach);
+          await loadData(currentCoach.id);
+        }
+      } catch (error) {
+        console.error("Auth error:", error);
+        if (isMounted) router.push("/");
       }
-      setCoach(currentCoach);
-      await loadData(currentCoach.id);
-    } catch (error) {
-      console.error("Auth error:", error);
-      router.push("/");
-    }
-  };
+    };
+
+    initializeData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [router]);
 
   const loadData = async (coachId) => {
     try {
-      // Load players
-      const { data: playersData, error: playersError } = await supabase
-        .from("players")
-        .select("*")
-        .eq("coach_id", coachId)
-        .order("name");
-
-      if (playersError) throw playersError;
-      setPlayers(playersData || []);
-
-      // Load recent reports
-      const { data: reportsData, error: reportsError } = await supabase
-        .from("reports")
-        .select(
+      const [playersResponse, reportsResponse] = await Promise.all([
+        supabase
+          .from("players")
+          .select("*")
+          .eq("coach_id", coachId)
+          .order("name"),
+        supabase
+          .from("reports")
+          .select(
+            `
+            *,
+            players:player_id (name)
           `
-          *,
-          players:player_id (name)
-        `
-        )
-        .eq("coach_id", coachId)
-        .order("created_at", { ascending: false })
-        .limit(5);
+          )
+          .eq("coach_id", coachId)
+          .order("created_at", { ascending: false })
+          .limit(5),
+      ]);
 
-      if (reportsError) throw reportsError;
-      setReports(reportsData || []);
+      if (playersResponse.error) throw playersResponse.error;
+      if (reportsResponse.error) throw reportsResponse.error;
+
+      setPlayers(playersResponse.data || []);
+      setReports(reportsResponse.data || []);
     } catch (error) {
       console.error("Error loading data:", error);
     } finally {
@@ -104,68 +121,105 @@ export default function Dashboard() {
 
   const handleAddPlayer = async (e) => {
     e.preventDefault();
-    try {
-      const { data, error } = await supabase
-        .from("players")
-        .insert([
-          {
-            ...playerForm,
-            coach_id: coach.id,
-            age: playerForm.age ? parseInt(playerForm.age) : null,
-            jersey_number: playerForm.jersey_number
-              ? parseInt(playerForm.jersey_number)
-              : null,
-          },
-        ])
-        .select();
 
-      if (error) throw error;
+    const newPlayer = {
+      ...playerForm,
+      coach_id: coach.id,
+      age: playerForm.age ? parseInt(playerForm.age) : null,
+      jersey_number: playerForm.jersey_number
+        ? parseInt(playerForm.jersey_number)
+        : null,
+      id: crypto.randomUUID(), // Temporary ID for optimistic update
+    };
 
-      setPlayers([...players, data[0]]);
-      setPlayerForm({ name: "", position: "", age: "", jersey_number: "" });
-      setShowAddPlayer(false);
-    } catch (error) {
-      console.error("Error adding player:", error);
-      alert("Error adding player: " + error.message);
-    }
+    startTransition(async () => {
+      addOptimisticPlayer(newPlayer);
+
+      try {
+        const { data, error } = await supabase
+          .from("players")
+          .insert([
+            {
+              ...playerForm,
+              coach_id: coach.id,
+              age: playerForm.age ? parseInt(playerForm.age) : null,
+              jersey_number: playerForm.jersey_number
+                ? parseInt(playerForm.jersey_number)
+                : null,
+            },
+          ])
+          .select();
+
+        if (error) throw error;
+
+        setPlayers((prev) => [...prev, data[0]]);
+        setPlayerForm({ name: "", position: "", age: "", jersey_number: "" });
+        setShowAddPlayer(false);
+      } catch (error) {
+        console.error("Error adding player:", error);
+        // Revert optimistic update on error
+        setPlayers((prev) => prev.filter((p) => p.id !== newPlayer.id));
+        alert("Error adding player: " + error.message);
+      }
+    });
   };
 
   const handleCreateReport = async (e) => {
     e.preventDefault();
-    try {
-      const { data, error } = await supabase.from("reports").insert([
-        {
-          ...reportForm,
-          coach_id: coach.id,
-          technical_skills: parseInt(reportForm.technical_skills),
-          physical_condition: parseInt(reportForm.physical_condition),
-          teamwork: parseInt(reportForm.teamwork),
-          attitude: parseInt(reportForm.attitude),
-        },
-      ]).select(`
-          *,
-          players:player_id (name)
-        `);
 
-      if (error) throw error;
+    const playerName = players.find((p) => p.id === reportForm.player_id)?.name;
+    const newReport = {
+      ...reportForm,
+      coach_id: coach.id,
+      technical_skills: parseInt(reportForm.technical_skills),
+      physical_condition: parseInt(reportForm.physical_condition),
+      teamwork: parseInt(reportForm.teamwork),
+      attitude: parseInt(reportForm.attitude),
+      id: crypto.randomUUID(),
+      players: { name: playerName },
+      created_at: new Date().toISOString(),
+    };
 
-      setReports([data[0], ...reports]);
-      setReportForm({
-        player_id: "",
-        report_date: new Date().toISOString().split("T")[0],
-        technical_skills: 5,
-        physical_condition: 5,
-        teamwork: 5,
-        attitude: 5,
-        strengths: "",
-        areas_for_improvement: "",
-        additional_notes: "",
-      });
-      setShowCreateReport(false);
-    } catch (error) {
-      console.error("Error creating report:", error);
-      alert("Error creating report: " + error.message);
-    }
+    startTransition(async () => {
+      addOptimisticReport(newReport);
+
+      try {
+        const { data, error } = await supabase.from("reports").insert([
+          {
+            ...reportForm,
+            coach_id: coach.id,
+            technical_skills: parseInt(reportForm.technical_skills),
+            physical_condition: parseInt(reportForm.physical_condition),
+            teamwork: parseInt(reportForm.teamwork),
+            attitude: parseInt(reportForm.attitude),
+          },
+        ]).select(`
+            *,
+            players:player_id (name)
+          `);
+
+        if (error) throw error;
+
+        setReports((prev) => [data[0], ...prev]);
+        setReportForm({
+          player_id: "",
+          report_date: new Date().toISOString().split("T")[0],
+          technical_skills: 5,
+          physical_condition: 5,
+          teamwork: 5,
+          attitude: 5,
+          strengths: "",
+          areas_for_improvement: "",
+          additional_notes: "",
+        });
+        setShowCreateReport(false);
+      } catch (error) {
+        console.error("Error creating report:", error);
+        // Revert optimistic update
+        setReports((prev) => prev.filter((r) => r.id !== newReport.id));
+        alert("Error creating report: " + error.message);
+      }
+    });
   };
 
   const handleDeletePlayer = async (playerId) => {
@@ -177,20 +231,28 @@ export default function Dashboard() {
       return;
     }
 
-    try {
-      const { error } = await supabase
-        .from("players")
-        .delete()
-        .eq("id", playerId);
+    startTransition(async () => {
+      // Optimistically remove player
+      const originalPlayers = players;
+      const originalReports = reports;
+      setPlayers((prev) => prev.filter((p) => p.id !== playerId));
+      setReports((prev) => prev.filter((r) => r.player_id !== playerId));
 
-      if (error) throw error;
+      try {
+        const { error } = await supabase
+          .from("players")
+          .delete()
+          .eq("id", playerId);
 
-      setPlayers(players.filter((p) => p.id !== playerId));
-      setReports(reports.filter((r) => r.player_id !== playerId));
-    } catch (error) {
-      console.error("Error deleting player:", error);
-      alert("Error deleting player: " + error.message);
-    }
+        if (error) throw error;
+      } catch (error) {
+        console.error("Error deleting player:", error);
+        // Revert on error
+        setPlayers(originalPlayers);
+        setReports(originalReports);
+        alert("Error deleting player: " + error.message);
+      }
+    });
   };
 
   const generateInviteCode = async () => {
@@ -202,10 +264,8 @@ export default function Dashboard() {
     try {
       setInviteStates((prev) => ({ ...prev, [player.id]: { loading: true } }));
 
-      // Generate invite code
       const inviteCode = await generateInviteCode();
 
-      // Create invite record
       const { data: invite, error: inviteError } = await supabase
         .from("player_invites")
         .insert([
@@ -221,7 +281,6 @@ export default function Dashboard() {
 
       if (inviteError) throw inviteError;
 
-      // Update player with email
       const { error: updateError } = await supabase
         .from("players")
         .update({
@@ -232,7 +291,6 @@ export default function Dashboard() {
 
       if (updateError) throw updateError;
 
-      // Generate invite link
       const baseUrl = window.location.origin;
       const link = `${baseUrl}/player/join?code=${inviteCode}`;
 
@@ -246,9 +304,8 @@ export default function Dashboard() {
         },
       }));
 
-      // Update local players state
-      setPlayers(
-        players.map((p) =>
+      setPlayers((prev) =>
+        prev.map((p) =>
           p.id === player.id ? { ...p, email: email, invite_sent: true } : p
         )
       );
@@ -288,10 +345,15 @@ export default function Dashboard() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="text-xl">Loading...</div>
+        <div className="animate-pulse text-xl">Loading...</div>
       </div>
     );
   }
+
+  const displayPlayers =
+    optimisticPlayers.length > 0 ? optimisticPlayers : players;
+  const displayReports =
+    optimisticReports.length > 0 ? optimisticReports : reports;
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -307,7 +369,7 @@ export default function Dashboard() {
             </div>
             <button
               onClick={handleSignOut}
-              className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+              className="flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
             >
               <LogOut className="w-4 h-4 mr-2" />
               Sign Out
@@ -331,7 +393,7 @@ export default function Dashboard() {
                       Total Players
                     </dt>
                     <dd className="text-lg font-medium text-gray-900">
-                      {players.length}
+                      {displayPlayers.length}
                     </dd>
                   </dl>
                 </div>
@@ -351,7 +413,7 @@ export default function Dashboard() {
                       Total Reports
                     </dt>
                     <dd className="text-lg font-medium text-gray-900">
-                      {reports.length}
+                      {displayReports.length}
                     </dd>
                   </dl>
                 </div>
@@ -371,7 +433,7 @@ export default function Dashboard() {
                       Invited Players
                     </dt>
                     <dd className="text-lg font-medium text-gray-900">
-                      {players.filter((p) => p.invite_sent).length}
+                      {displayPlayers.filter((p) => p.invite_sent).length}
                     </dd>
                   </dl>
                 </div>
@@ -390,7 +452,8 @@ export default function Dashboard() {
                 </h3>
                 <button
                   onClick={() => setShowAddPlayer(!showAddPlayer)}
-                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
+                  disabled={isPending}
+                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors"
                 >
                   <Plus className="w-4 h-4 mr-1" />
                   Add Player
@@ -398,162 +461,32 @@ export default function Dashboard() {
               </div>
 
               {showAddPlayer && (
-                <form
+                <PlayerForm
+                  playerForm={playerForm}
+                  setPlayerForm={setPlayerForm}
                   onSubmit={handleAddPlayer}
-                  className="mb-6 p-4 bg-gray-50 rounded-md"
-                >
-                  <div className="grid grid-cols-2 gap-4">
-                    <input
-                      type="text"
-                      placeholder="Player Name"
-                      value={playerForm.name}
-                      onChange={(e) =>
-                        setPlayerForm({ ...playerForm, name: e.target.value })
-                      }
-                      className="border border-gray-300 rounded-md px-3 py-2"
-                      required
-                    />
-                    <input
-                      type="text"
-                      placeholder="Position"
-                      value={playerForm.position}
-                      onChange={(e) =>
-                        setPlayerForm({
-                          ...playerForm,
-                          position: e.target.value,
-                        })
-                      }
-                      className="border border-gray-300 rounded-md px-3 py-2"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Age"
-                      value={playerForm.age}
-                      onChange={(e) =>
-                        setPlayerForm({ ...playerForm, age: e.target.value })
-                      }
-                      className="border border-gray-300 rounded-md px-3 py-2"
-                    />
-                    <input
-                      type="number"
-                      placeholder="Jersey Number"
-                      value={playerForm.jersey_number}
-                      onChange={(e) =>
-                        setPlayerForm({
-                          ...playerForm,
-                          jersey_number: e.target.value,
-                        })
-                      }
-                      className="border border-gray-300 rounded-md px-3 py-2"
-                    />
-                  </div>
-                  <div className="mt-4 flex gap-2">
-                    <button
-                      type="submit"
-                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                    >
-                      Add Player
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowAddPlayer(false)}
-                      className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
+                  onCancel={() => setShowAddPlayer(false)}
+                  isLoading={isPending}
+                />
               )}
 
               <div className="space-y-4">
-                {players.map((player) => (
-                  <div
+                {displayPlayers.map((player) => (
+                  <PlayerCard
                     key={player.id}
-                    className="border border-gray-200 rounded-lg p-4"
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <p className="font-medium">{player.name}</p>
-                        <p className="text-sm text-gray-500">
-                          {player.position}{" "}
-                          {player.jersey_number && `#${player.jersey_number}`}{" "}
-                          {player.age && `(Age: ${player.age})`}
-                        </p>
-                        {player.email && (
-                          <p className="text-xs text-gray-400">
-                            Email: {player.email}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => {
-                            setSelectedPlayer(player);
-                            setReportForm({
-                              ...reportForm,
-                              player_id: player.id,
-                            });
-                            setShowCreateReport(true);
-                          }}
-                          className="text-blue-600 hover:text-blue-800"
-                          title="Create Report"
-                        >
-                          <FileText className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeletePlayer(player.id)}
-                          className="text-red-600 hover:text-red-800"
-                          title="Delete Player"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Invite System */}
-                    {!player.invite_sent && !inviteStates[player.id]?.sent && (
-                      <PlayerInviteForm
-                        player={player}
-                        loading={inviteStates[player.id]?.loading}
-                        onInvite={(email) => handleInvitePlayer(player, email)}
-                      />
-                    )}
-
-                    {(player.invite_sent || inviteStates[player.id]?.sent) && (
-                      <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-md">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm text-green-700">
-                            ✓ Invite sent to{" "}
-                            {player.email || inviteStates[player.id]?.email}
-                          </span>
-                          {inviteStates[player.id]?.link && (
-                            <button
-                              onClick={() =>
-                                copyInviteLink(
-                                  player.id,
-                                  inviteStates[player.id].link
-                                )
-                              }
-                              className="flex items-center px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-                            >
-                              {inviteStates[player.id]?.copied ? (
-                                <Check className="w-3 h-3" />
-                              ) : (
-                                <Copy className="w-3 h-3" />
-                              )}
-                            </button>
-                          )}
-                        </div>
-                        {inviteStates[player.id]?.link && (
-                          <p className="text-xs text-green-600 mt-1 font-mono break-all">
-                            {inviteStates[player.id].link}
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                    player={player}
+                    inviteState={inviteStates[player.id]}
+                    onInvite={handleInvitePlayer}
+                    onDelete={handleDeletePlayer}
+                    onCopyInvite={copyInviteLink}
+                    onCreateReport={() => {
+                      setReportForm({ ...reportForm, player_id: player.id });
+                      setShowCreateReport(true);
+                    }}
+                    isLoading={isPending}
+                  />
                 ))}
-                {players.length === 0 && (
+                {displayPlayers.length === 0 && (
                   <p className="text-gray-500 text-center py-4">
                     No players added yet
                   </p>
@@ -562,17 +495,18 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Recent Reports Section */}
+          {/* Reports Section */}
           <div className="bg-white shadow rounded-lg">
             <div className="px-4 py-5 sm:p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg leading-6 font-medium text-gray-900">
                   Recent Reports
                 </h3>
-                {players.length > 0 && (
+                {displayPlayers.length > 0 && (
                   <button
                     onClick={() => setShowCreateReport(!showCreateReport)}
-                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-green-600 hover:bg-green-700"
+                    disabled={isPending}
+                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition-colors"
                   >
                     <Plus className="w-4 h-4 mr-1" />
                     New Report
@@ -584,14 +518,15 @@ export default function Dashboard() {
                 <ReportForm
                   reportForm={reportForm}
                   setReportForm={setReportForm}
-                  players={players}
+                  players={displayPlayers}
                   onSubmit={handleCreateReport}
                   onCancel={() => setShowCreateReport(false)}
+                  isLoading={isPending}
                 />
               )}
 
               <div className="space-y-3">
-                {reports.map((report) => (
+                {displayReports.map((report) => (
                   <div key={report.id} className="p-3 bg-gray-50 rounded-md">
                     <div className="flex justify-between items-start">
                       <div>
@@ -616,7 +551,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                 ))}
-                {reports.length === 0 && (
+                {displayReports.length === 0 && (
                   <p className="text-gray-500 text-center py-4">
                     No reports created yet
                   </p>
@@ -630,7 +565,161 @@ export default function Dashboard() {
   );
 }
 
-// Separate component for player invite form
+// Extracted components for better organization
+function PlayerForm({
+  playerForm,
+  setPlayerForm,
+  onSubmit,
+  onCancel,
+  isLoading,
+}) {
+  return (
+    <form onSubmit={onSubmit} className="mb-6 p-4 bg-gray-50 rounded-md">
+      <div className="grid grid-cols-2 gap-4">
+        <input
+          type="text"
+          placeholder="Player Name"
+          value={playerForm.name}
+          onChange={(e) =>
+            setPlayerForm({ ...playerForm, name: e.target.value })
+          }
+          className="border border-gray-300 text-black rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          required
+          disabled={isLoading}
+        />
+        <input
+          type="text"
+          placeholder="Position"
+          value={playerForm.position}
+          onChange={(e) =>
+            setPlayerForm({ ...playerForm, position: e.target.value })
+          }
+          className="border border-gray-300 text-black rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          disabled={isLoading}
+        />
+        <input
+          type="number"
+          placeholder="Age"
+          value={playerForm.age}
+          onChange={(e) =>
+            setPlayerForm({ ...playerForm, age: e.target.value })
+          }
+          className="border border-gray-300 text-black rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          disabled={isLoading}
+        />
+        <input
+          type="number"
+          placeholder="Jersey Number"
+          value={playerForm.jersey_number}
+          onChange={(e) =>
+            setPlayerForm({ ...playerForm, jersey_number: e.target.value })
+          }
+          className="border border-gray-300 text-black rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          disabled={isLoading}
+        />
+      </div>
+      <div className="mt-4 flex gap-2">
+        <button
+          type="submit"
+          disabled={isLoading}
+          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 transition-colors"
+        >
+          {isLoading ? "Adding..." : "Add Player"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={isLoading}
+          className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function PlayerCard({
+  player,
+  inviteState,
+  onInvite,
+  onDelete,
+  onCopyInvite,
+  onCreateReport,
+  isLoading,
+}) {
+  return (
+    <div className="border border-gray-200 rounded-lg p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <p className="font-medium text-black">{player.name}</p>
+          <p className="text-sm  text-gray-500">
+            {player.position}{" "}
+            {player.jersey_number && `#${player.jersey_number}`}{" "}
+            {player.age && `(Age: ${player.age})`}
+          </p>
+          {player.email && (
+            <p className="text-xs text-gray-400">Email: {player.email}</p>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={onCreateReport}
+            disabled={isLoading}
+            className="text-blue-600 hover:text-blue-800 disabled:opacity-50"
+            title="Create Report"
+          >
+            <FileText className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => onDelete(player.id)}
+            disabled={isLoading}
+            className="text-red-600 hover:text-red-800 disabled:opacity-50"
+            title="Delete Player"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {!player.invite_sent && !inviteState?.sent && (
+        <PlayerInviteForm
+          player={player}
+          loading={inviteState?.loading}
+          onInvite={onInvite}
+        />
+      )}
+
+      {(player.invite_sent || inviteState?.sent) && (
+        <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-md">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-green-700">
+              ✓ Invite sent to {player.email || inviteState?.email}
+            </span>
+            {inviteState?.link && (
+              <button
+                onClick={() => onCopyInvite(player.id, inviteState.link)}
+                className="flex items-center px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+              >
+                {inviteState?.copied ? (
+                  <Check className="w-3 h-3" />
+                ) : (
+                  <Copy className="w-3 h-3" />
+                )}
+              </button>
+            )}
+          </div>
+          {inviteState?.link && (
+            <p className="text-xs text-green-600 mt-1 font-mono break-all">
+              {inviteState.link}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PlayerInviteForm({ player, loading, onInvite }) {
   const [email, setEmail] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -638,7 +727,7 @@ function PlayerInviteForm({ player, loading, onInvite }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (email) {
-      onInvite(email);
+      onInvite(player, email);
       setEmail("");
       setShowForm(false);
     }
@@ -648,7 +737,7 @@ function PlayerInviteForm({ player, loading, onInvite }) {
     return (
       <button
         onClick={() => setShowForm(true)}
-        className="w-full mt-2 px-3 py-2 text-sm bg-blue-50 text-blue-700 border border-blue-200 rounded-md hover:bg-blue-100"
+        className="w-full mt-2 px-3 py-2 text-sm bg-blue-50 text-blue-700 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
       >
         <Mail className="w-4 h-4 inline mr-1" />
         Invite to Portal
@@ -667,19 +756,21 @@ function PlayerInviteForm({ player, loading, onInvite }) {
           placeholder="Player's email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded"
+          className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500"
           required
+          disabled={loading}
         />
         <button
           type="submit"
           disabled={loading || !email}
-          className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+          className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
         >
           {loading ? "Sending..." : "Send"}
         </button>
         <button
           type="button"
           onClick={() => setShowForm(false)}
+          disabled={loading}
           className="px-2 py-1 text-sm text-gray-600 hover:text-gray-800"
         >
           ✕
@@ -689,13 +780,13 @@ function PlayerInviteForm({ player, loading, onInvite }) {
   );
 }
 
-// Separate component for report form
 function ReportForm({
   reportForm,
   setReportForm,
   players,
   onSubmit,
   onCancel,
+  isLoading,
 }) {
   return (
     <form onSubmit={onSubmit} className="mb-6 p-4 bg-gray-50 rounded-md">
@@ -705,8 +796,9 @@ function ReportForm({
           onChange={(e) =>
             setReportForm({ ...reportForm, player_id: e.target.value })
           }
-          className="w-full border border-gray-300 rounded-md px-3 py-2"
+          className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           required
+          disabled={isLoading}
         >
           <option value="">Select Player</option>
           {players.map((player) => (
@@ -722,8 +814,9 @@ function ReportForm({
           onChange={(e) =>
             setReportForm({ ...reportForm, report_date: e.target.value })
           }
-          className="w-full border border-gray-300 rounded-md px-3 py-2"
+          className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           required
+          disabled={isLoading}
         />
 
         <div className="grid grid-cols-2 gap-4">
@@ -749,6 +842,7 @@ function ReportForm({
                   setReportForm({ ...reportForm, [field]: e.target.value })
                 }
                 className="w-full"
+                disabled={isLoading}
               />
               <span className="text-sm text-gray-500">
                 {reportForm[field]}/10
@@ -763,8 +857,9 @@ function ReportForm({
           onChange={(e) =>
             setReportForm({ ...reportForm, strengths: e.target.value })
           }
-          className="w-full border border-gray-300 rounded-md px-3 py-2"
+          className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           rows="3"
+          disabled={isLoading}
         />
 
         <textarea
@@ -776,8 +871,9 @@ function ReportForm({
               areas_for_improvement: e.target.value,
             })
           }
-          className="w-full border border-gray-300 rounded-md px-3 py-2"
+          className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           rows="3"
+          disabled={isLoading}
         />
 
         <textarea
@@ -786,22 +882,25 @@ function ReportForm({
           onChange={(e) =>
             setReportForm({ ...reportForm, additional_notes: e.target.value })
           }
-          className="w-full border border-gray-300 rounded-md px-3 py-2"
+          className="w-full border border-gray-300 rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           rows="3"
+          disabled={isLoading}
         />
       </div>
 
       <div className="mt-4 flex gap-2">
         <button
           type="submit"
-          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+          disabled={isLoading}
+          className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 transition-colors"
         >
-          Create Report
+          {isLoading ? "Creating..." : "Create Report"}
         </button>
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+          disabled={isLoading}
+          className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400 transition-colors"
         >
           Cancel
         </button>
